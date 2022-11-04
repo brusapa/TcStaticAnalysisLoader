@@ -58,6 +58,20 @@ namespace AllTwinCAT.TcStaticAnalysisLoader
             logger?.LogDebug("TcStaticAnalysisLoader.exe : argument 1: {vsPath}", options.VisualStudioSolutionFilePath);
             logger?.LogDebug("TcStaticAnalysisLoader.exe : argument 2: {tsPath}", options.TwincatProjectFilePath);
 
+            // If the paths are relatives, resolve them
+            if (!Path.IsPathRooted(options.VisualStudioSolutionFilePath))
+            {
+                options.VisualStudioSolutionFilePath = Path.GetFullPath(options.VisualStudioSolutionFilePath);
+            }
+            if (!Path.IsPathRooted(options.TwincatProjectFilePath))
+            {
+                options.TwincatProjectFilePath = Path.GetFullPath(options.TwincatProjectFilePath);
+            }
+            if (!Path.IsPathRooted(options.ReportPath))
+            {
+                options.ReportPath = Path.GetFullPath(options.ReportPath);
+            }
+
             /* Verify that the Visual Studio solution file and TwinCAT project file exists.*/
             if (!File.Exists(options.VisualStudioSolutionFilePath))
             {
@@ -97,14 +111,9 @@ namespace AllTwinCAT.TcStaticAnalysisLoader
             ITcAutomationSettings settings = (ITcAutomationSettings)dte.GetObject("TcAutomationSettings");
             settings.SilentMode = true; // Only available from TC3.1.4020.0 and above
 
-            /* Build the solution and collect any eventual errors. Make sure to
-             * filter out everything that is 
-             * - Either a warning or an error
-             * - Starts with the string "SA", which is everything from the TE1200
-             *   static code analysis tool
-             */
-            dte.Solution.SolutionBuild.Clean(true);
-            dte.Solution.SolutionBuild.Build(true);
+            // Search for PLC programs
+            var plcProgram = GetPlcProject(dte, options.TwincatProjectFilePath, logger);
+            plcProgram.RunStaticAnalysis(false);
 
             // Get active errors
             var report = new ErrorReport(options.VisualStudioSolutionFilePath, options.TwincatProjectFilePath);
@@ -155,6 +164,42 @@ namespace AllTwinCAT.TcStaticAnalysisLoader
                 Environment.Exit((int)ExitValues.RunOkAndNoErrors);
         }
 
+        public static ITcPlcIECProject3 GetPlcProject(DTE2 dte, string projectPath, ILogger? logger = null)
+        {
+            var projectName = Path.GetFileNameWithoutExtension(projectPath);
+            ITcSysManager3? twincatProject = null;
+            foreach (EnvDTE.Project project in dte.Solution.Projects)
+            {
+                if (project.Name == projectName)
+                {
+                    twincatProject = (ITcSysManager3)project.Object;
+                    break;
+                }
+            }
+            if (twincatProject == null)
+            {
+                var errorString = $"Project {projectName} not found in solution";
+                logger?.LogError(errorString);
+                throw new Exception(errorString);
+            }
+            var tree = twincatProject.LookupTreeItem("TIPC");
+            var name = tree.Child[1].Name;
+            return (ITcPlcIECProject3)twincatProject.LookupTreeItem($"TIPC^{name}^{name} Project");
+        }
+
+
+        private static List<ITcPlcIECProject3> FindPLCProjects(ITcSysManager sysManager)
+        {
+            var plcProjectsList = new List<ITcPlcIECProject3>();
+            var tree = sysManager.LookupTreeItem("TIPC");
+            for (var ii = 0; ii < tree.ChildCount; ii++)
+            {
+                var name = tree.Child[ii + 1].Name;
+                plcProjectsList.Add((ITcPlcIECProject3)sysManager.LookupTreeItem($"TIPC^{name}^{name} Project"));
+            }
+            return plcProjectsList;
+        }
+
         private static DTE2 GetDTEFromVisualStudioSolution(string visualStudioSolutionFilePath, ILogger? logger = null)
         {
             // Get Visual Studio version
@@ -163,7 +208,7 @@ namespace AllTwinCAT.TcStaticAnalysisLoader
             /* Make sure the DTE loads with the same version of Visual Studio as the
              * TwinCAT project was created in
              */
-            string VisualStudioProgId = "VisualStudio.DTE." + vsVersion;
+            string VisualStudioProgId = "TcXaeShell.DTE." + vsVersion;
             var type = Type.GetTypeFromProgID(VisualStudioProgId);
             if (type == null)
             {

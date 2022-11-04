@@ -12,6 +12,8 @@
     <RepositoryUrl>https://github.com/sagatowski/TcStaticAnalysisLoader</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <RootNamespace>AllTwinCAT.TcStaticAnalysisLoader</RootNamespace>
+	<PackAsTool>true</PackAsTool>
+	<ToolCommandName>TcStaticAnalysisLoader</ToolCommandName>
   </PropertyGroup>
 
   <ItemGroup>
